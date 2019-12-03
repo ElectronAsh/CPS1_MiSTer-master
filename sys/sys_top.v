@@ -486,7 +486,7 @@ pattern_vg
 );
 
 
-wire reset;
+(*keep*) wire reset;
 sysmem_lite sysmem
 (
 	//Reset/Clock

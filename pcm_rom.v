@@ -155,6 +155,6 @@ endmodule
 // Retrieval info: GEN_FILE: TYPE_NORMAL pcm_rom.inc FALSE
 // Retrieval info: GEN_FILE: TYPE_NORMAL pcm_rom.cmp FALSE
 // Retrieval info: GEN_FILE: TYPE_NORMAL pcm_rom.bsf FALSE
-// Retrieval info: GEN_FILE: TYPE_NORMAL pcm_rom_inst.v TRUE
+// Retrieval info: GEN_FILE: TYPE_NORMAL pcm_rom_inst.v FALSE
 // Retrieval info: GEN_FILE: TYPE_NORMAL pcm_rom_bb.v FALSE
 // Retrieval info: LIB_FILE: altera_mf
