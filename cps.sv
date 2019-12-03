@@ -187,7 +187,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .PS2DIV(1000), .WIDE(1)) hps_io
 
 
 ///////////////////////////////////////////////////
-wire clk_sys, clk_ram, pll_locked;
+wire clk_sys, clk_ram, clk_ntsc, pll_locked;
 
 pll pll
 (
@@ -195,6 +195,7 @@ pll pll
 	.rst(0),
 	.outclk_0(clk_sys),
 	.outclk_1(clk_ram),
+	.outclk_2(clk_ntsc),
 	.locked(pll_locked)
 );
 
@@ -883,7 +884,7 @@ wire [7:0] T80_DO;
 T80s T80s_inst
 (
 	.RESET_n( T80_RESET_N ) ,	// input  RESET_n
-	.CLK( CLK_DIV[3] ) ,			// input  CLK
+	.CLK( clk_ntsc ) ,			// input  CLK
 	.CEN( T80_CLKEN ) ,			// input  CEN
 	.WAIT_n( T80_WAIT_N ) ,		// input  WAIT_n
 	.INT_n( T80_INT_N ) ,		// input  INT_n
@@ -972,7 +973,7 @@ reg PCM_SS_REG;
 
 reg [15:0] DELAY;
 reg [3:0] CNT;
-always @(posedge CLK_DIV[3] or posedge reset)
+always @(posedge clk_ntsc or posedge reset)
 if (reset) begin
 	//Z80_CMD_REG <= 8'h00;
 	//Z80_FADE_REG <= 8'h00;
@@ -1039,7 +1040,7 @@ else begin
 end
 
 
-wire JT51_CLK = CLK_DIV[3];
+wire JT51_CLK = clk_ntsc;
 wire JT51_RsT = reset;
 wire JT51_CS_N = !Z80_JT51_CS;
 wire JT51_WR_N = !(Z80_JT51_CS && !T80_WR_N && !T80_MREQ_N);
@@ -1048,7 +1049,7 @@ wire [7:0] JT51_DI = T80_DO;
 wire [7:0] JT51_DO;
 wire JT51_CT1;
 wire JT51_CT2;
-(*keep*) wire JT51_IRQ_N;
+wire JT51_IRQ_N;
 wire JT51_P1;
 wire JT51_SAMPLE;
 (*keep*) wire signed [15:0] JT51_L;
@@ -1090,7 +1091,7 @@ jt51 jt51_inst
 
 /*
 wire PCM_RESET_N = !reset;
-wire PCM_CLK = CLK_DIV[3];
+wire PCM_CLK = clk_ntsc;
 
 wire [7:0] PCM_DI = T80_DO;
 wire [7:0] PCM_DO;
@@ -1196,8 +1197,14 @@ assign AUDIO_MIX = 0;
 //assign AUDIO_L = MIX_L[16:1];
 //assign AUDIO_R = MIX_R[16:1];
 
+// Original chip quality...
 assign AUDIO_L = JT51_XLEFT;
 assign AUDIO_R = JT51_XRIGHT;
+
+// Better quality?...
+//assign AUDIO_L = JT51_XLEFT;
+//assign AUDIO_R = JT51_XRIGHT;
+
 //assign AUDIO_R = PCM_SOUND_OUT[19:4];
 
 
