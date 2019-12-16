@@ -1,3 +1,9 @@
+//
+// Prelim CPS-A custom chip logic.
+//
+// ElectronAsh. 2019.
+//
+//
 module cps_a (
 	input RESET_N,
 	

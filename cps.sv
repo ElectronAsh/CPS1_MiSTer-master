@@ -206,8 +206,6 @@ wire ce_pix;
 wire hblank, vblank;
 wire interlace;
 
-assign DDRAM_CLK = clk_ram;
-
 
 wire [12:0] audio_l, audio_r;
 
@@ -332,7 +330,7 @@ end
 (*keep*) wire [15:0] fx68k_di;
 (*keep*) wire [15:0] fx68k_do;
 
-(*keep*) wire fx68k_dtack_n = (CPU_ROM_CS/* | CPU_RAM_CS*/) ? !sdram_ready : 1'b0;
+(*keep*) wire fx68k_dtack_n = (CPU_ROM_CS /*| CPU_RAM_CS*/) ? sdram_68k_busy : 1'b0;
 
 
 (*keep*) wire fx68k_ipl_n_2 = !HBLANK_INT;
@@ -410,6 +408,7 @@ cpu_rom_lo	cpu_rom_lo_inst (
 wire [7:0] ROM_LO_DO;
 */
 
+/*
 assign SDRAM_CLK = clk_ram;
 
 sdram sdram (
@@ -439,22 +438,160 @@ sdram sdram (
    .dout           ( sdram_dout                ),
 	.ready          ( sdram_ready               )
 );
+wire sdram_ready;
+*/
 
-wire [15:0] sdram_din = /*(ioctl_download) ? */{ioctl_data[7:0],ioctl_data[15:8]}/* :
-														  fx68k_do*/;
-									
-wire  [1:0] sdram_be = /*(ioctl_download) ? */2'b11/* : 
-												      CPU_RAM_BE*/;
 
-wire [24:0] sdram_addr = (ioctl_download) ? ioctl_addr : 
-								 /*(CPU_RAM_CS) ? {9'b000010000, fx68k_addr[15:1], 1'b0} :	// Force 68000 RAM to map to 0x100000-0x10FFFF (BYTE address!) in SDRAM.*/
-													 {fx68k_addr, 1'b0};								// Allow reading of 68000 ROM.
-													
-wire sdram_wr = (ioctl_download) ? ioctl_wr : CPU_RAM_WREN;
-wire sdram_rd = (ioctl_download) ? 1'b0 : !fx68k_as_n && fx68k_rw && (CPU_ROM_CS/* | CPU_RAM_CS*/);
+sdram sdram
+(
+	.*,
+	
+	.init(~pll_locked),
+	
+	//.clk( clk_ram ),
+	.clk( clk_sys ),			// Apparently don't need the phase shift any more? DDIO is used to generate SDRAM_CLK instead.
+	
+	// Port 0.
+	.addr0( sdram_addr ),	// WORD address!! [20:1]
+	.dout0( sdram_dout ),
+	.rd0( sdram_rd ),
+	.din0( sdram_din ),
+	.wrl0( sdram_wrh ),
+	.wrh0( sdram_wrl ),
+	.rfs0( sdram_rfs0 ),
+	.busy0( sdram_68k_busy ),
 
-(*keep*) wire [15:0] sdram_dout;
-(*keep*) wire sdram_ready;
+	// Port 1.
+	.addr1( ioctl_addr ),
+	.dout1( ),
+	.rd1(0),
+
+	.din1( {ioctl_data[7:0],ioctl_data[15:8]} ),
+	.wrl1( ioctl_wr ),		// HPS writes a whole WORD at a time.
+	.wrh1( ioctl_wr ),
+	.rfs1(0),
+	.busy1( sdram_cart_busy ),
+	
+	// Port 2.
+	.addr2(0),
+	.din2(0),
+	.dout2(),
+	.rd2(0),
+	.wrl2(0),
+	.wrh2(0),
+	.rfs2(0),
+	.busy2()
+);
+
+reg sdram_rfs0;
+reg [8:0] refresh_counter;
+reg refresh_pending;
+always @(posedge clk_sys or posedge reset)
+if (reset) begin
+	//refresh_counter <= 9'd400;
+	refresh_counter <= 9'd200;
+	refresh_pending <= 1'b0;
+	sdram_rfs0 <= 1'b0;
+end
+else begin
+	if (refresh_counter==0) begin
+		refresh_counter <= 9'd200;
+		refresh_pending <= 1'b1;
+	end
+	else refresh_counter <= refresh_counter - 9'd1;
+	
+	if (refresh_pending && !sdram_68k_busy && fx68k_as_n) begin
+		sdram_rfs0 <= 1'b1;
+		refresh_pending <= 1'b0;
+	end
+end
+
+
+/*
+sdram ram1(
+	.SDRAM_CLK(SDRAM_CLK),
+	.SDRAM_CKE(SDRAM_CKE),
+	.SDRAM_A(SDRAM_A),
+	.SDRAM_BA(SDRAM_BA),
+	.SDRAM_DQ(SDRAM_DQ),
+	.SDRAM_DQML(SDRAM_DQML),
+	.SDRAM_DQMH(SDRAM_DQMH),
+	.SDRAM_nCS(SDRAM_nCS),
+	.SDRAM_nCAS(SDRAM_nCAS),
+	.SDRAM_nRAS(SDRAM_nRAS),
+	.SDRAM_nWE(SDRAM_nWE),
+
+	.init(~pll_locked),	// Init SDRAM as soon as the PLL is locked
+	.clk(clk_sys),
+	
+	.ch1_addr( ch1_addr ),		// input      [26:1] ch1_addr. 25 bit address for 8bit mode. addr[0] = 0 for 16bit mode for correct operations.
+	.ch1_dout( ch1_dout ),		// output reg [63:0] ch1_dout. data output
+	.ch1_din( ch1_din ),			// input      [15:0] ch1_din.  data input
+	.ch1_req( ch1_req ),			// input             ch1_req.  request
+	.ch1_rnw( ch1_rnw ),			// input             ch1_rnw.  1 - read, 0 - write
+	.ch1_ready( ch1_ready ),	// output reg        ch1_ready,
+	
+	.ch2_addr( ch2_addr ),		// input      [26:1] ch2_addr. 25 bit address for 8bit mode. addr[0] = 0 for 16bit mode for correct operations.
+	.ch2_dout( ch2_dout ),		// output reg [31:0] ch2_dout. data output
+	.ch2_din( ch2_din ),			// input      [31:0] ch2_din.  data input
+	.ch2_req( ch2_req ),			// input             ch2_req.  request
+	.ch2_rnw( ch2_rnw ),			// input             ch2_rnw.  1 - read, 0 - write
+	.ch2_ready( ch2_ready ),	// output reg        ch2_ready,
+	
+	.ch3_addr( ch3_addr ),		// input      [26:1] ch3_addr. 25 bit address for 8bit mode. addr[0] = 0 for 16bit mode for correct operations.
+	.ch3_dout( ch3_dout ),		// output reg [15:0] ch3_dout. data outpu
+	.ch3_din( ch3_din ),			// input      [15:0] ch3_din.  data input
+	.ch3_req( ch3_req ),			// input             ch3_req.  request
+	.ch3_rnw( ch3_rnw ),			// input             ch3_rnw.  1 - read, 0 - write
+	.ch3_ready( ch3_ready )		// output reg        ch3_ready,
+);
+wire [26:1] ch1_addr = sdram_addr;
+wire [63:0] ch1_dout;
+wire [15:0] ch1_din;
+wire ch1_req = !ioctl_download && CPU_ROM_CS && !fx68k_as_n;
+wire ch1_rnw = fx68k_rw;
+wire ch1_ready;
+
+wire [26:1] ch2_addr = ioctl_addr;
+wire [31:0] ch2_dout = {ioctl_data, ioctl_data};
+wire [31:0] ch2_din;
+wire ch2_req = ioctl_download && ioctl_wr;
+wire ch2_rnw = 1'b0;	// Write!
+wire ch2_ready;
+
+wire [26:1] ch3_addr;
+wire [15:0] ch3_dout;
+wire [15:0] ch3_din;
+wire ch3_req = 1'b0;
+wire ch3_rnw;
+wire ch3_ready;
+
+//assign ioctl_wait = ioctl_download && !ch3_ready;
+assign ioctl_wait = 1'b0;
+
+
+//(*keep*) wire sdram_68k_busy = !ch1_ready;
+(*keep*) wire sdram_68k_busy = 1'b0;
+
+(*keep*) wire [15:0] sdram_dout = ch1_dout[15:0];
+
+(*keep*) wire [15:0] sdram_din = fx68k_do;
+*/
+
+								
+wire [20:1] sdram_addr = /*(CPU_RAM_CS) ? {5'b10000, fx68k_addr[15:1]} :*/	// Force 68000 RAM to map to 0x100000-0x10FFFF (WORD address!) in SDRAM.
+													    fx68k_addr[20:1];					// Allow reading of 68000 ROM.
+
+//wire sdram_wrh = CPU_RAM_CS && !fx68k_uds_n && !fx68k_as_n && !fx68k_rw && fx68k_enPhi1;
+//wire sdram_wrl = CPU_RAM_CS && !fx68k_lds_n && !fx68k_as_n && !fx68k_rw && fx68k_enPhi1;
+
+wire sdram_wrh = 1'b0;
+wire sdram_wrl = 1'b0;
+
+wire sdram_rd = !fx68k_as_n && fx68k_rw && (CPU_ROM_CS/* | CPU_RAM_CS*/);
+
+
+//wire  [1:0] sdram_be = 2'b11;
 
 
 // BYTE Addresses for SDRAM...
@@ -470,12 +607,9 @@ wire sdram_rd = (ioctl_download) ? 1'b0 : !fx68k_as_n && fx68k_rw && (CPU_ROM_CS
 //assign rom_wrack = 1'b1;
 //assign rom_rdack = 1'b1;
 
-assign ioctl_wait = !sdram_ready;
-
 
 (*keep*) wire CPU_RAM_WREN = CPU_RAM_CS && fx68k_write_pulse;
 (*keep*) wire [1:0] CPU_RAM_BE = {!fx68k_uds_n, !fx68k_lds_n};
-
 
 cpu_ram	cpu_ram_inst (
 	.clock ( clk_sys ),
@@ -488,7 +622,6 @@ cpu_ram	cpu_ram_inst (
 	.q ( CPU_RAM_DO )
 );
 (*keep*) wire [15:0] CPU_RAM_DO;
-
 
 
 (*noprune*) reg [10:0] KEEP_REG;
@@ -676,7 +809,10 @@ wire [7:0] DIPB = ~{DIFF, VS_MODE, 6'b000000};
 // DIPSW C.
 wire FREEZE = 1'b0;			// Definitely keep this OFF! lol
 wire FLIP_SCREEN = 1'b0;
-wire DEMO_SOUNDS = 1'b1;
+
+//wire DEMO_SOUNDS = 1'b1;
+wire DEMO_SOUNDS = 1'b0;	// TESTING. Not sure if this stuff is inverted?
+
 wire GAME_MODE = 1'b0;		// 0=GAME. 1=TEST.
 wire [7:0] DIPC = ~{3'b000, FREEZE, FLIP_SCREEN, DEMO_SOUNDS, 1'b0, GAME_MODE};
 
@@ -688,13 +824,14 @@ wire [7:0] DIPC = ~{3'b000, FREEZE, FLIP_SCREEN, DEMO_SOUNDS, 1'b0, GAME_MODE};
 (*keep*) assign fx68k_di = //(CPU_ROM_CS) ? ROM_DATA_FULL : 
 									(CPU_ROM_CS) ? sdram_dout :
 
-									//(CPU_RAM_CS) ? sdram_dout :
 									(CPU_RAM_CS) ? CPU_RAM_DO :
+									//(CPU_RAM_CS) ? sdram_dout :
 									 
 									(PLAYER_CS) ? JOYSTICKS :
 									 
-									(SERV_CS)  ? {SERV, 8'hFF} :	// Switches / DIP Switch bits are already active-LOW here,
-									(DIPA_CS)  ? {DIPA, 8'hFF} :	// and mapped to the upper bits of the 68K!
+									(SERV_CS)  ? {SERV, 8'hFF} :	// Coin/Start/Service button bits are already active-LOW here. Mapped to the upper bits of the 68K!
+									
+									(DIPA_CS)  ? {DIPA, 8'hFF} :
 									(DIPB_CS)  ? {DIPB, 8'hFF} :
 									(DIPC_CS)  ? {DIPC, 8'hFF} :
 									 
@@ -1260,6 +1397,9 @@ wire [15:0] rom_data;
 wire rom_rd;
 wire rom_rdack;
 /*
+
+assign DDRAM_CLK = clk_ram;
+
 ddram ddram
 (
 	.*,
@@ -1390,118 +1530,5 @@ cps_video_beam cps_video_beam_inst
 	.vid_dena(vid_dena) 		// output  vid_dena
 );
 */
-
-
-/*
-wire ram_rdy_n;
-wire ram_ref;
-wire [3:0] ram_cyc;
-wire [3:0] ram_acc;
-wire [8:0] ram_slot;
-
-wire slot_rst;
-
-wire [15:0] rd_data;
-
-wire rden_b0;
-wire wren_b0;
-wire [31:0] addr_b0;
-wire valid_b0;
-wire fetch_b0;
-wire [1:0] wr_bena_b0;
-wire [15:0] wr_data_b0;
-
-wire rden_b1;
-wire wren_b1;
-wire [31:0] addr_b1;
-wire valid_b1;
-wire fetch_b1;
-wire [1:0] wr_bena_b1;
-wire [15:0] wr_data_b1;
-
-wire rden_b2;
-wire wren_b2;
-wire [31:0] addr_b2;
-wire valid_b2;
-wire fetch_b2;
-wire [1:0] wr_bena_b2;
-wire [15:0] wr_data_b2;
-
-wire rden_b3;
-wire wren_b3;
-wire [31:0] addr_b3;
-wire valid_b3;
-wire fetch_b3;
-wire [1:0] wr_bena_b3;
-wire [15:0] wr_data_b3;
-
-sdram_ctrl_16b sdram_ctrl_16b_inst
-(
-	.rst( reset ) ,			// input  rst
-	.clk( clk_sys ) ,			// input  clk
-	
-	.ram_rdy_n(ram_rdy_n) ,	// output  ram_rdy_n
-	.ram_ref(ram_ref) ,		// output  ram_ref
-	.ram_cyc(ram_cyc) ,		// output [3:0] ram_cyc
-	.ram_acc(ram_acc) ,		// output [3:0] ram_acc
-	.ram_slot(ram_slot) ,	// output [8:0] ram_slot
-	
-	.slot_rst(slot_rst) ,	// output  slot_rst
-	
-	.rd_data(rd_data) ,	// output [15:0] rd_data
-	
-	.rden_b0(rden_b0) ,	// input  rden_b0
-	.wren_b0(wren_b0) ,	// input  wren_b0
-	.addr_b0(addr_b0) ,	// input [31:0] addr_b0
-	.valid_b0(valid_b0) ,	// output  valid_b0
-	.fetch_b0(fetch_b0) ,	// output  fetch_b0
-	.wr_bena_b0(wr_bena_b0) ,	// input [1:0] wr_bena_b0
-	.wr_data_b0(wr_data_b0) ,	// input [15:0] wr_data_b0
-	
-	.rden_b1(rden_b1) ,	// input  rden_b1
-	.wren_b1(wren_b1) ,	// input  wren_b1
-	.addr_b1(addr_b1) ,	// input [31:0] addr_b1
-	.valid_b1(valid_b1) ,	// output  valid_b1
-	.fetch_b1(fetch_b1) ,	// output  fetch_b1
-	.wr_bena_b1(wr_bena_b1) ,	// input [1:0] wr_bena_b1
-	.wr_data_b1(wr_data_b1) ,	// input [15:0] wr_data_b1
-	
-	.rden_b2(rden_b2) ,	// input  rden_b2
-	.wren_b2(wren_b2) ,	// input  wren_b2
-	.addr_b2(addr_b2) ,	// input [31:0] addr_b2
-	.valid_b2(valid_b2) ,	// output  valid_b2
-	.fetch_b2(fetch_b2) ,	// output  fetch_b2
-	.wr_bena_b2(wr_bena_b2) ,	// input [1:0] wr_bena_b2
-	.wr_data_b2(wr_data_b2) ,	// input [15:0] wr_data_b2
-	
-	.rden_b3(rden_b3) ,	// input  rden_b3
-	.wren_b3(wren_b3) ,	// input  wren_b3
-	.addr_b3(addr_b3) ,	// input [31:0] addr_b3
-	.valid_b3(valid_b3) ,	// output  valid_b3
-	.fetch_b3(fetch_b3) ,	// output  fetch_b3
-	.wr_bena_b3(wr_bena_b3) ,	// input [1:0] wr_bena_b3
-	.wr_data_b3(wr_data_b3) ,	// input [15:0] wr_data_b3
-	
-	.sdram_cs_n( SDRAM_nCS ) ,	// output  sdram_cs_n
-	.sdram_ras_n( SDRAM_nRAS ) ,// output  sdram_ras_n
-	.sdram_cas_n( SDRAM_nCAS ) ,// output  sdram_cas_n
-	.sdram_we_n( SDRAM_nWE ) ,	// output  sdram_we_n
-	.sdram_ba( SDRAM_BA ) ,		// output [1:0] sdram_ba
-	.sdram_addr( SDRAM_A ) ,	// output [12:0] sdram_addr
-	.sdram_dqm_n( {SDRAM_DQMH, SDRAM_DQML} ) ,// output [1:0] sdram_dqm_n
-	.sdram_dq_oe( sdram_dq_oe ) ,// output  sdram_dq_oe
-	.sdram_dq_o( sdram_dq_o ) ,	// output [15:0] sdram_dq_o
-	.sdram_dq_i( SDRAM_DQ ) 		// input [15:0] sdram_dq_i
-);
-
-wire sdram_dq_oe;
-wire [15:0] sdram_dq_o;
-
-assign SDRAM_CLK = clk_ram;
-assign SDRAM_CKE = 1'b1;
-
-assign SDRAM_DQ = (sdram_dq_oe) ? sdram_dq_o : 16'hzzzz;
-*/
-
 
 endmodule

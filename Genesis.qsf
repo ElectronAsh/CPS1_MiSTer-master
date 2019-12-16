@@ -361,7 +361,6 @@ set_global_assignment -name VERILOG_FILE jt51/jt51.v
 set_global_assignment -name CDF_FILE jtag.cdf
 set_global_assignment -name QIP_FILE sys/sys.qip
 set_global_assignment -name QSYS_FILE sys/vip.qsys
-set_global_assignment -name QIP_FILE TG68K/TG68K.qip
 set_global_assignment -name QIP_FILE T80/t80.qip
 set_global_assignment -name SYSTEMVERILOG_FILE compressor.sv
 set_global_assignment -name VHDL_FILE dpram.vhd
